@@ -1,0 +1,420 @@
+Jenkins Project
+===============
+
+Setup Jenkins (AL2 with t2.micro)
+Integrate GIT
+Integrate Maven
+Setup Sonar (AL2 with t2.medium)
+Setup Tomcat (AL2 with t2.micro)
+Setup S3 for Artifacts
+Setup Nexus (Ubuntu 24 with t2.medium)
+
+Login and set the hostnames
+-------------------------
+
+hostnamectl set-hostname Jenkins
+hostnamectl set-hostname sonar
+hostnamectl set-hostname tomcat
+hostnamectl set-hostname nexus
+
+----------------------------------------
+Install Jenkins using Script from GitHub, 8080
+Install Sonar using Script from GitHub , 9000
+Install Tomcat using Script from GitHub. 8080
+Install Nexus using GitHub, 8081
+
+----------------------------------------
+
+
+Plugins
+-------
+Deploy to Container,
+S3 Publisher,
+nexus artifacts uploader
+SonarQube Scanner, 
+Maven Integration plugins ,
+Sonar Scanner Quality Gates ,
+OWASP Dependency-Check.
+
+
+==================================
+Integrate tomcat in Jenkins Pipeline 
+--------------------------------
+
+Install plugin : deploy to container
+-----------------------------------
+
+Restart Jenkins
+
+systemctl restart Jenkins.service
+
+Manage Jenkins --> Credentials --> System --> Global credentials (unrestricted) --> Add credentials --> Username:tomcat, password: root123456, id = tomcatcreds
+
+
+
+Open Pipeline Syntax 
+-------------------
+select deploy:Deploy war/ear to a container
+WAR/EAR files = **/*.war
+Context path = myapp
+Add container --> select tomcat 9
+credentials = tomcatcreds
+Tomcat URL = http://13.126.17.44:8080/
+
+Generate 
+=========
+
+Tomcat integration Pipeline
+--------------------------
+
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git'
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('artifact') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }       
+        stage('deploy') {
+            steps {
+                deploy adapters: [tomcat9(credentialsId: 'tomcatcreds', path: '', url: 'http://13.126.17.44:8080/')], contextPath: 'myapp', war: '**/*.war'
+            }
+        }
+        
+    }
+}
+	
+
+
+
+
+Upload artifacts to S3
+======================
+
+Instal plugins = S3 publisher
+
+RESTART the Jenkins
+
+Manage Jenkins --> System --> S3 Profile --> Name = s3creds, Access Key and Secret Key and Test
+
+Create a New Build job 
+
+Use Pipeline Script S3upload and fill all details 
+
+S3 profile = s3creds
+Source = **/*.war
+Destination bucket = jen-pro-demo/
+Bucket Region = ap-south-1
+Server Side Encryption ON
+
+
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git'
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('artifact') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Upload to S3') {
+            steps {
+                s3Upload consoleLogLevel: 'INFO', dontSetBuildResultOnFailure: false, dontWaitForConcurrentBuildCompletion: false, entries: [[bucket: 'jenkins-artifacts-demo-test', excludedFile: '', flatten: false, gzipFiles: false, keepForever: false, managedArtifacts: false, noUploadOnFailure: false, selectedRegion: 'ap-south-1', showDirectlyInBrowser: false, sourceFile: '**/*.war', storageClass: 'STANDARD', uploadFromSlave: false, useServerSideEncryption: true]], pluginFailureResultConstraint: 'FAILURE', profileName: 's3creds', userMetadata: []
+            }
+        }        
+        stage('deploy') {
+            steps {
+                deploy adapters: [tomcat9(credentialsId: 'tomcatcreds', path: '', url: 'http://13.126.17.44:8080/')], contextPath: 'myapp', war: '**/*.war'
+            }
+        }
+        
+    }
+}
+
+
+=====================================
+SONARQUBE 
+=====================================
+
+====== TAKE SonarQube.sh to install ======
+
+
+SETUP: Launch another EC2 instance - Amazon linux 2 - t2.medium is must , it will not run on micro
+
+============ script ========================
+#! /bin/bash
+#Launch an instance t2.medium, port 9000
+cd /opt/
+wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-8.9.6.50800.zip
+unzip sonarqube-8.9.6.50800.zip
+amazon-linux-extras install java-openjdk11 -y
+useradd sonar
+chown sonar:sonar sonarqube-8.9.6.50800 -R
+chmod 777 sonarqube-8.9.6.50800 -R
+su - sonar
+# use the below command manually after installation
+#sh /opt/sonarqube-8.9.6.50800/bin/linux/sonar.sh start
+#echo "user=admin & password=admin"
+
+=================================================
+
+Once installed manually type below command
+
+sh /opt/sonarqube-8.9.6.50800/bin/linux-x86-64/sonar.sh start
+
+dont run this - echo "user=admin & password=admin"
+
+==================
+
+==============================
+If you have stopped the sonar, start the sonar manually
+su - sonar
+sh /opt/sonarqube-8.9.6.50800/bin/linux-x86-64/sonar.sh start
+===============================
+
+Open http://IP:9000
+
+username: admin, 
+Password : admin
+
+
+
+Add project --> Manually --> project key =myapp --> generate token--> myapp --> click on maven
+
+d38f10c7e6d3d7aab93b9eb6b398869068308b90
+
+Go to Credentials 
+-----------------
+--> Kind= Secret text , secret = c7fc89bc61e79ad060081f980aa3b0a40dfe9115 (sonar project key)
+id --> sonar , description = sonar
+
+Go to System 
+-------------
+--> SonarQube servers --> Enable Environment Variables --> Add SonarQube Server
+     Name = SonarQube
+     URL = http://3.110.190.217:9000
+     Server authentication token = select token - sonar
+
+
+Go to  Tools 
+-------------
+--> SonarQube Scanner installations , Name = sonarscanner --> dont click add installer
+
+
+===============================
+
+
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git'
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.7.0.1746:sonar' 
+                }
+            }
+        }        
+        stage('artifact') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Pushing Artifacts to S3') {
+            steps {
+                s3Upload consoleLogLevel: 'INFO', dontSetBuildResultOnFailure: false, dontWaitForConcurrentBuildCompletion: false, entries: [[bucket: 'jen-pro-demo/', excludedFile: '', flatten: false, gzipFiles: false, keepForever: false, managedArtifacts: false, noUploadOnFailure: false, selectedRegion: 'ap-south-1', showDirectlyInBrowser: false, sourceFile: '**/*.war', storageClass: 'STANDARD', uploadFromSlave: false, useServerSideEncryption: true]], pluginFailureResultConstraint: 'FAILURE', profileName: 's3creds', userMetadata: []
+            }
+        }
+        stage('deploy') {
+            steps {
+                deploy adapters: [tomcat9(credentialsId: 'tomcatcreds', path: '', url: 'http://3.111.245.237:8080/')], contextPath: 'myapp', war: '**/*.war'
+            }
+        }
+        
+    }
+}
+
+
+
+OWASP Dependency-Check is a tool that identifies project dependencies and checks if there are any known, publicly disclosed, vulnerabilities. It can be used in various software development contexts to enhance the security of applications by identifying and alerting developers about vulnerable components that may be included in their projects.
+
+Go to Plugins and install  OWASP Dependency-Check and restart
+
+Go to Tools --> Dependency-Check installations --> Name = DC --> install automatically --> Save
+
+
+OWASP Integration to Jenkins
+-----------------------------
+Go to Manage Jenkins --> Tools -->Dependency-Check installations --> Add
+Name = DC
+Install automatically
+Add installer --> install from GitHub
+
+
+        stage('OWASP Dependency Check'){
+            steps {
+                dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('Sonar Quality Gate Scan'){
+            steps {
+                timeout(time: 15, unit:"MINUTES"){
+                    waitForQualityGate abortPipeline: false
+                }
+                    
+            }
+        }  
+
+==============================
+NEXUS
+============================
+Launch Ubuntu 24 with t2.medium(must) and install Nexus
+
+Architecture
+
+GitHub --> Jenkins (Jenkins delivery artifacts war) --> this war file now pushed to Nexus
+
+Open --> http://ip:8081 --> it takes 13 secs
+
+Click on sign in --> username = admin, password = cat /app/sonatype-work/nexus3/admin.password
+next --> root123456 --> Disable anonymous access
+
+Creating Repo
+=============
+Click on Setting Symbol --> Repositories --> Create repository --> maven2(hosted) --> name(hotstar) --> save
+
+Version Policy --> Snapshot 
+
+Deployment policy --> allow to redeploy
+
+
+
+Integrate Nexus to Jenkins Pipeline
+================================
+
+Jenkins (Code --> Build --> Test --> Artifact) --> Nexus 
+
+If you want to integrate any 3rd party to Jenkins, install plugins
+
+1. Download the Plugins (nexus artifacts uploader)
+   --> Manage Jenkins --> Plugins --> Available Plugins --> Just type only Nexus , it will give nexus artifacts uploader 
+2. Configure in Jenkins pipeline in stage
+
+Note: all the information will be available in pom.xml file
+
+First create Credentials for Nexus
+----------------------------------
+
+Manage Jenkins --> Credentials --> Username = admin, password = root123456  , id = nexus , description = nexus
+
+Create a new pipeline job --> and copy paste the script and click on pipeline syntax
+
+sample step : nexusartifactuploader
+Nexus Version : see nexus version in browser left top 3.0
+Protocol:http
+Nexus URL : IP:8081 (dont put http)
+Credentials : Add --> Jenkins --> username:admin, password: root123, description: nexus
+credentials: select admin
+Groupid: see pom file (in.reyaz)
+version: see pom file (1.2.2) 8.3.3-SNAPSHOT
+Repository: repo that you created in nexus  : hotstar
+Artifact: Add : Artifactid: see pom (myapp) , Type = .war, classifier = empty,  File = target/myapp.war
+ --> generate pipeline script
+
+nexusArtifactUploader artifacts: [[artifactId: 'myapp', classifier: '', file: 'target/myapp.war', type: '.war']], credentialsId: 'nexus', groupId: 'in.reyaz', nexusUrl: '13.126.193.100:8081', nexusVersion: 'nexus3', protocol: 'http', repository: 'hotstar', version: '8.3.3-SNAPSHOT'
+
+Final Pipeline
+--------------
+
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git'
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.7.0.1746:sonar' 
+                }
+            }
+        }        
+        stage('artifact') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Pushing Artifacts to S3') {
+            steps {
+                s3Upload consoleLogLevel: 'INFO', dontSetBuildResultOnFailure: false, dontWaitForConcurrentBuildCompletion: false, entries: [[bucket: 'jen-pro-demo/', excludedFile: '', flatten: false, gzipFiles: false, keepForever: false, managedArtifacts: false, noUploadOnFailure: false, selectedRegion: 'ap-south-1', showDirectlyInBrowser: false, sourceFile: '**/*.war', storageClass: 'STANDARD', uploadFromSlave: false, useServerSideEncryption: true]], pluginFailureResultConstraint: 'FAILURE', profileName: 's3creds', userMetadata: []
+            }
+        }
+        stage('deploy') {
+            steps {
+                deploy adapters: [tomcat9(credentialsId: 'tomcatcreds', path: '', url: 'http://3.111.245.237:8080/')], contextPath: 'myapp', war: '**/*.war'
+            }
+        }
+        stage('Push to Nexus') {
+            steps {
+                nexusArtifactUploader artifacts: [[artifactId: 'myapp', classifier: '', file: 'target/myapp.war', type: '.war']], credentialsId: 'nexus', groupId: 'in.reyaz', nexusUrl: '3.110.32.212:8081', nexusVersion: 'nexus3', protocol: 'http', repository: 'hotstar', version: '8.3.3-SNAPSHOT'
+            }
+        }
+        
+    }
+}
